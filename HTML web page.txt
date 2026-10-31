@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Advanced Drone Ground Control Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; font-family: Arial, sans-serif; }
+    body { background: linear-gradient(135deg, #081120, #111827, #0f172a); color: white; overflow-x: hidden; }
+    .header { width: 100%; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.15); letter-spacing: 1px; }
+    .container { display: grid; grid-template-columns: 380px 1fr; gap: 20px; padding: 20px; }
+    .sidebar { display: flex; flex-direction: column; gap: 20px; }
+    .card, .map-section { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 20px; padding: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.35); backdrop-filter: blur(10px); }
+    .card h2, .map-section h2 { margin-bottom: 16px; font-size: 22px; color: #60a5fa; }
+    .telemetry { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .telemetry-box { background: rgba(255,255,255,0.05); border-radius: 14px; padding: 14px; text-align: center; min-height: 84px; }
+    .telemetry-box .label { color: #94a3b8; font-size: 14px; margin-bottom: 8px; }
+    .telemetry-box .value { font-size: 22px; font-weight: bold; word-break: break-word; }
+    .status { margin-top: 18px; background: #16a34a; display: inline-block; padding: 10px 16px; border-radius: 999px; font-weight: bold; }
+    .status.warn { background: #f59e0b; color: #111; }
+    .status.danger { background: #ef4444; color: white; }
+    .coords { margin-top: 14px; font-size: 15px; color: #fca5a5; font-weight: bold; line-height: 1.5; }
+    .controls button, .btn { width: 100%; margin-top: 10px; padding: 12px; border: none; border-radius: 12px; font-size: 15px; font-weight: bold; cursor: pointer; transition: 0.2s; text-decoration: none; color: white; display: inline-block; text-align: center; }
+    .controls button:hover, .btn:hover { transform: scale(1.02); filter: brightness(1.1); }
+    .takeoff { background: #22c55e; color: #111; }
+    .land { background: #f59e0b; color: #111; }
+    .home { background: #3b82f6; color: white; }
+    .loiter { background: #8b5cf6; color: white; }
+    .emergency { background: #ef4444; color: white; }
+    .delete-all { background: #991b1b; color: white; }
+    .map-section { min-width: 0; }
+    .map-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; gap: 10px; flex-wrap: wrap; }
+    .live-pill { background: #dc2626; padding: 8px 12px; border-radius: 999px; font-weight: bold; box-shadow: 0 0 18px rgba(220,38,38,0.7); }
+    .map-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; height: 600px; }
+    .camera-view, .satellite-view { border-radius: 18px; overflow: hidden; position: relative; background: #0b1220; border: 1px solid rgba(255,255,255,0.12); min-height: 300px; }
+    .camera-view { background: linear-gradient(180deg, #1e293b, #0f172a); }
+    .camera-view img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .camera-placeholder { height: 100%; min-height: 300px; display: flex; justify-content: center; align-items: center; color: #94a3b8; text-align: center; padding: 20px; background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 40px 40px; }
+    .camera-label, .map-label { position: absolute; top: 15px; left: 15px; background: rgba(0,0,0,0.65); padding: 8px 12px; border-radius: 10px; font-weight: bold; z-index: 500; }
+    #map { width: 100%; height: 100%; min-height: 300px; border-radius: 18px; overflow: hidden; }
+    .log { margin-top: 15px; font-family: monospace; color: #cbd5e1; max-height: 200px; overflow-y: auto; font-size: 13px; line-height: 1.5; }
+    .alerts-card { margin-top: 20px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; overflow: hidden; border-radius: 12px; }
+    th, td { border: 1px solid rgba(255,255,255,0.12); padding: 9px; vertical-align: top; }
+    th { background: rgba(15, 23, 42, 0.9); color: #34d399; position: sticky; top: 0; z-index: 2; }
+    tr:nth-child(even) { background: rgba(255,255,255,0.03); }
+    .thumb { width: 130px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); }
+    .new { color: #ef4444; font-weight: bold; }
+    .verified { color: #22c55e; font-weight: bold; }
+    .false-alert { color: #f59e0b; font-weight: bold; }
+    .closed { color: #94a3b8; font-weight: bold; }
+    .action-btn { border: none; cursor: pointer; padding: 7px 9px; margin: 3px; border-radius: 8px; font-size: 12px; text-decoration: none; color: white; display: inline-block; }
+    .verify-btn { background: #047857; }
+    .false-btn { background: #b45309; }
+    .close-btn { background: #4b5563; }
+    .delete-btn { background: #b91c1c; }
+    .popup-img { width: 180px; border-radius: 6px; margin-top: 6px; }
+    @media (max-width: 1100px) { .container { grid-template-columns: 1fr; } .map-grid { grid-template-columns: 1fr; height: auto; } .camera-view, .satellite-view { height: 380px; } }
+  </style>
+</head>
+
+<body>
+<div class="header">🚁 Drone Simulator & Fire Monitoring Dashboard</div>
+
+<div class="container">
+  <div class="sidebar">
+    <div class="card">
+      <h2>Live Drone Telemetry</h2>
+      <div class="telemetry">
+        <div class="telemetry-box"><div class="label">Altitude</div><div class="value" id="altitude">-- m</div></div>
+        <div class="telemetry-box"><div class="label">GPS</div><div class="value" id="gps-ok">WAIT</div></div>
+        <div class="telemetry-box"><div class="label">Latest Confidence</div><div class="value" id="confidence">--</div></div>
+        <div class="telemetry-box"><div class="label">Latest Label</div><div class="value" id="latest-label">--</div></div>
+        <div class="telemetry-box"><div class="label">Alert Count</div><div class="value" id="alert-count">0</div></div>
+        <div class="telemetry-box"><div class="label">Fire Status</div><div class="value" id="fire-status">CLEAR</div></div>
+      </div>
+      <div class="status warn" id="system-status">WAITING FOR DATA</div>
+      <div class="coords" id="coords">Drone Coordinates:<br>LAT: --<br>LON: --</div>
+    </div>
+
+    <div class="card controls">
+      <h2>Mission Controls</h2>
+      <button class="takeoff" onclick="sendDroneCommand('takeoff', { altitude: 10 })">Takeoff 10m</button>
+      <button class="land" onclick="sendDroneCommand('land')">Land</button>
+      <button class="home" onclick="sendDroneCommand('rtl')">Return Home</button>
+      <button class="loiter" onclick="sendDroneCommand('loiter')">Loiter</button>
+      <button class="emergency" onclick="sendDroneCommand('emergency_stop')">Emergency Stop</button>
+      <button class="btn delete-all" onclick="deleteAllAlerts()">Delete All Alerts</button>
+      <div class="log" id="log">[SYSTEM] Dashboard loaded...<br>[INFO] Waiting for fire alerts and telemetry...<br></div>
+    </div>
+  </div>
+
+  <div class="map-section">
+    <div class="map-header">
+      <h2>Mission Monitoring</h2>
+      <div class="live-pill">LIVE FEED</div>
+    </div>
+
+    <div class="map-grid">
+      <div class="camera-view">
+        <div class="camera-label">Latest Alert Snapshot</div>
+        <div id="camera-content" class="camera-placeholder">No fire/smoke alert image yet.<br>Run AI detection to upload snapshot.</div>
+      </div>
+      <div class="satellite-view">
+        <div class="map-label">Drone + Fire Alert Map</div>
+        <div id="map"></div>
+      </div>
+    </div>
+
+    <div class="card alerts-card">
+      <h2>SQLite Alert Records</h2>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Time</th><th>Drone ID</th><th>Event</th><th>Label</th><th>Confidence</th><th>GPS</th><th>Altitude</th><th>Snapshot</th><th>Status</th><th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="alerts-body"><tr><td colspan="11">Loading alerts...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API_BASE = window.location.protocol === "file:" ? "http://127.0.0.1:5000" : window.location.origin;
+  let map;
+  let markersLayer;
+  let droneMarker = null;
+  let latestAlerts = [];
+
+  const droneIcon = L.divIcon({
+    className: "drone-icon",
+    html: `<div style="font-size:28px; filter: drop-shadow(0 0 5px #00aaff);">🚁</div>`,
+    iconSize: [32, 32],
+    iconAnchor: [16, 16]
+  });
+
+  function addLog(message) {
+    const log = document.getElementById("log");
+    const time = new Date().toLocaleTimeString();
+    log.innerHTML = `[${time}] ${message}<br>` + log.innerHTML;
+  }
+
+  function initMap(lat = 17.385044, lon = 78.486671) {
+    map = L.map("map").setView([lat, lon], 14);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
+    markersLayer = L.layerGroup().addTo(map);
+  }
+
+  function statusClass(status) {
+    if (status === "verified") return "verified";
+    if (status === "false_alert") return "false-alert";
+    if (status === "closed") return "closed";
+    return "new";
+  }
+
+  function updateLiveTelemetry(t, count) {
+    document.getElementById("alert-count").innerText = count;
+    if (!t) return;
+
+    document.getElementById("altitude").innerText = `${Number(t.altitude || 0).toFixed(2)} m`;
+    document.getElementById("gps-ok").innerText = t.gps_ok ? "OK" : "WAIT";
+    document.getElementById("confidence").innerText = Number(t.latest_confidence || 0).toFixed(3);
+    document.getElementById("latest-label").innerText = t.latest_label || "--";
+    document.getElementById("fire-status").innerText = t.fire_confirmed ? "CONFIRMED" : (t.fire_detected ? "CHECKING" : "CLEAR");
+    document.getElementById("coords").innerHTML = `Drone Coordinates:<br>LAT: ${t.latitude}<br>LON: ${t.longitude}`;
+
+    const status = document.getElementById("system-status");
+    if (t.fire_confirmed) { status.className = "status danger"; status.innerText = "CONFIRMED FIRE ALERT"; }
+    else if (t.fire_detected) { status.className = "status warn"; status.innerText = "CHECKING FIRE/SMOKE"; }
+    else if (t.gps_ok) { status.className = "status"; status.innerText = "DRONE TELEMETRY ONLINE"; }
+    else { status.className = "status warn"; status.innerText = "GPS WAIT"; }
+
+    if (t.gps_ok && Number(t.latitude) !== 0 && Number(t.longitude) !== 0) {
+      const pos = [Number(t.latitude), Number(t.longitude)];
+      if (!droneMarker) {
+        droneMarker = L.marker(pos, { icon: droneIcon }).addTo(map).bindPopup("Live Drone Position");
+      } else {
+        droneMarker.setLatLng(pos);
+      }
+    }
+  }
+
+  function updateLatestSnapshot(alerts) {
+    const latestWithImage = alerts.find(a => a.image);
+    if (latestWithImage) {
+      document.getElementById("camera-content").className = "";
+      document.getElementById("camera-content").innerHTML = `<img src="data:image/jpeg;base64,${latestWithImage.image}" alt="Latest alert snapshot">`;
+    }
+  }
+
+  function updateTable(alerts) {
+    const body = document.getElementById("alerts-body");
+    if (!alerts || alerts.length === 0) {
+      body.innerHTML = `<tr><td colspan="11">No alerts stored in SQLite.</td></tr>`;
+      return;
+    }
+
+    body.innerHTML = alerts.map(alert => `
+      <tr>
+        <td>${alert.id}</td>
+        <td>${alert.timestamp}</td>
+        <td>${alert.drone_id}</td>
+        <td>${alert.event_type}</td>
+        <td>${alert.label}</td>
+        <td>${alert.confidence}</td>
+        <td>Lat: ${alert.latitude}<br>Lon: ${alert.longitude}</td>
+        <td>${alert.altitude} m</td>
+        <td>${alert.image ? `<img class="thumb" src="data:image/jpeg;base64,${alert.image}">` : "No image"}</td>
+        <td class="${statusClass(alert.status)}">${alert.status}</td>
+        <td>
+          <button class="action-btn verify-btn" onclick="setAlertStatus(${alert.id}, 'verified')">Verify</button>
+          <button class="action-btn false-btn" onclick="setAlertStatus(${alert.id}, 'false_alert')">False Alert</button>
+          <button class="action-btn close-btn" onclick="setAlertStatus(${alert.id}, 'closed')">Close</button>
+          <button class="action-btn delete-btn" onclick="deleteAlert(${alert.id})">Delete</button>
+        </td>
+      </tr>
+    `).join("");
+  }
+
+  function updateMap(alerts) {
+    markersLayer.clearLayers();
+    if (!alerts || alerts.length === 0) return;
+
+    alerts.forEach(alert => {
+      if (!alert.latitude || !alert.longitude) return;
+      let popup = `
+        <b>Alert ID:</b> ${alert.id}<br>
+        <b>Drone:</b> ${alert.drone_id}<br>
+        <b>Event:</b> ${alert.event_type}<br>
+        <b>Label:</b> ${alert.label}<br>
+        <b>Confidence:</b> ${alert.confidence}<br>
+        <b>Status:</b> ${alert.status}<br>
+        <b>Altitude:</b> ${alert.altitude} m<br>
+        <b>Time:</b> ${alert.timestamp}<br>
+        <b>Lat:</b> ${alert.latitude}<br>
+        <b>Lon:</b> ${alert.longitude}<br>`;
+      if (alert.image) popup += `<img class="popup-img" src="data:image/jpeg;base64,${alert.image}">`;
+      L.marker([alert.latitude, alert.longitude]).addTo(markersLayer).bindPopup(popup);
+    });
+  }
+
+  async function setAlertStatus(alertId, status) {
+    try {
+      const response = await fetch(`${API_BASE}/api/alerts/${alertId}/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status })
+      });
+      if (!response.ok) throw new Error("Status update failed");
+      addLog(`[ACTION] Alert ${alertId} marked as ${status}`);
+      await loadAll();
+    } catch (error) { addLog("[ERROR] " + error.message); }
+  }
+
+  async function deleteAlert(alertId) {
+    if (!confirm(`Delete alert ID ${alertId}?`)) return;
+    try {
+      const response = await fetch(`${API_BASE}/api/alerts/${alertId}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Delete failed");
+      addLog(`[ACTION] Alert ${alertId} deleted`);
+      await loadAll();
+    } catch (error) { addLog("[ERROR] " + error.message); }
+  }
+
+  async function deleteAllAlerts() {
+    if (!confirm("Delete ALL alerts from SQLite? This cannot be undone.")) return;
+    try {
+      const response = await fetch(`${API_BASE}/api/alerts`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Delete all failed");
+      addLog("[ACTION] All alerts deleted");
+      await loadAll();
+    } catch (error) { addLog("[ERROR] " + error.message); }
+  }
+
+  async function sendDroneCommand(command, params = {}) {
+    if (command === "emergency_stop" && !confirm("Send EMERGENCY STOP command? Use only in SITL/testing unless safety verified.")) return;
+    try {
+      const response = await fetch(`${API_BASE}/api/drone-command`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command, params })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.message || "Command failed");
+      addLog(`[COMMAND] ${command}: ${data.message}`);
+    } catch (error) { addLog(`[ERROR] ${command}: ${error.message}`); }
+  }
+
+  async function loadAll() {
+    try {
+      const [alertsResponse, telemetryResponse] = await Promise.all([
+        fetch(`${API_BASE}/api/alerts`),
+        fetch(`${API_BASE}/api/telemetry`)
+      ]);
+      const alerts = await alertsResponse.json();
+      const telemetry = await telemetryResponse.json();
+      latestAlerts = alerts;
+      updateLiveTelemetry(telemetry, alerts.length);
+      updateLatestSnapshot(alerts);
+      updateTable(alerts);
+      updateMap(alerts);
+
+      // Keep map centered on live drone when available, otherwise latest alert.
+      if (telemetry.gps_ok && Number(telemetry.latitude) !== 0 && Number(telemetry.longitude) !== 0) {
+        map.setView([Number(telemetry.latitude), Number(telemetry.longitude)], 14);
+      } else if (alerts.length > 0) {
+        map.setView([alerts[0].latitude, alerts[0].longitude], 14);
+      }
+    } catch (error) {
+      addLog("[ERROR] Dashboard API not reachable: " + error.message);
+      document.getElementById("system-status").className = "status danger";
+      document.getElementById("system-status").innerText = "API OFFLINE";
+    }
+  }
+
+  initMap();
+  loadAll();
+  setInterval(loadAll, 1000);
+</script>
+</body>
+</html>
